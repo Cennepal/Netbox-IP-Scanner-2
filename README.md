@@ -9,7 +9,7 @@ Well, it's not crack, but hear me out.
 
 - First, ping3 is used for network stuffs and not networkscan, which is borked.
 - Second, you will actually be able to run this across your gazillion subnets without it aborting. The timeout is 10 hours, put it higher if you need.
-- Third, one of my own additions. Now the scan marks IP Addresses as either 'online', 'in dns' or 'offline'. So even if something is offline at the time of scan, it will be saved.
+- Third, one of my own additions. Now the scan marks IP Addresses as either 'online', 'in dns' or 'offline'. So even if something is offline at the time of scan, but it has an existing DNS entry, it will be saved.
 
 # Alright, here are the dependencies. No rush.
 Alright here you go:  
