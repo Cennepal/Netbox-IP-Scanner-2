@@ -28,3 +28,15 @@ FIELD_CHOICES = {
     )
 }
 ```
+# FAQ
+**Q: Huh?**  
+A: Huh?
+
+**Q: What about using Netbox ipam.models instead of the REST API, isn't that dumb?**  
+A: You are correct, but I hope you stub your toe. I tried implementing that undocumented clusterfuck and failed. It didn't even error out! It also produced logs showing it was working correctly, except it didn't commit to the database! Why? How the fuck should I know? I tried using .create and .save, but couldn't be bothered anymore. So yeah.
+
+**Q: Did you make an FAQ for one question thinking it was funny?**  
+A: Yes.
+
+**Q: Is this the last question?**  
+A: Yeah.
