@@ -1,81 +1,76 @@
-from extras.scripts import Script, StringVar
-import pynetbox, urllib3, socket, ipaddress
-from ping3 import ping, verbose_ping
+from extras.scripts import Script
+import socket
+import ipaddress
+from ping3 import ping
+from ipam.models import IPAddress, Prefix
 
-class IpScan(Script):
+class IPScanner(Script):
     class Meta:
         name = "IP Scanner"
         description = "Scans available prefixes and updates ip addresses in IPAM Module using ping3"
-        job_timeout = 36000
-
-    token = StringVar(
-        description="Token for API access"
-    )
-    netbox_url = StringVar(
-        description="Netbox URL"
-    )
+        job_timeout = 36000  # Timeout für 10 Stunden
 
     def run(self, data, commit):
-
-        def reverse_lookup(ip):
-            '''
-            Mini function that does DNS reverse lookup with controlled failure
-            '''
+        # Reverse Lookup mit Abbruch
+        def reverse_dns_lookup(ip):
             try:
-                data = socket.gethostbyaddr(ip)
-            except Exception:
-                return '' # Bricht schön ab
-            if data[0] == '': # Gibt wenn nichts da ist
+                return socket.gethostbyaddr(ip)[0]
+            except socket.herror:
                 return ''
-            else:
-                return data[0]
 
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning) # HTTP Warnung ausmachen
+        # Prefixe aus Netbox ziehen
+        subnets = Prefix.objects.all()
 
-        nb = pynetbox.api(url=data['netbox_url'], token=data['token'])
-        nb.http_session.verify = False # Keine Zertifikate checken
-
-        subnets = nb.ipam.prefixes.all()  # Prefixe auslesen
-
+        # Iteration über alle Prefixe
         for subnet in subnets:
-            if str(subnet.status) == 'Reserved': # Keine reservierten Subnets scannen
-                self.log_info(f"Scan of {subnet.prefix} NOT done (is Reserved)")
+            self.log_info(f"Processing subnet: {subnet.prefix}")
+
+            # Reservierte Subnetze überspringen
+            if subnet.status == 'reserved':
+                self.log_info(f"Skipping reserved subnet: {subnet.prefix}")
                 continue
-            IPv4network = ipaddress.IPv4Network(subnet.prefix)
-            mask = '/'+str(IPv4network.prefixlen)
 
-            # IPs von Netbox ziehen
-            netbox_addresses = dict()
-            for ip in nb.ipam.ip_addresses.filter(parent=str(subnet.prefix)):
-                netbox_addresses[str(ip.address)] = ip
+            # IP-Adressen aus dem Subnetz ziehen
+            network = ipaddress.IPv4Network(subnet.prefix)
+            mask = f"/{network.prefixlen}"
 
-            for address in IPv4network.hosts(): # Addressen pro Prefix verarbeiten
-                ip_mask=str(address)+mask
-                current_in_netbox = netbox_addresses.get(ip_mask)
-                name = reverse_lookup(str(address)) # Namensauflösung
-                if ping(str(address), timeout=1):  # Wenn Ping durch geht
-                    if current_in_netbox != None: # Die Addresse ist schon in Netbox, setze den als online und check ob sich die Name geändert hat
-                        if current_in_netbox.status.label != "Online":
-                            current_in_netbox.update(data={'status':'online'})
-                        if current_in_netbox.dns_name.lower() != name.lower(): # Wenn die Namen vom DNS und Netbox nicht passen, wird die Name vom DNS übernommen
-                            self.log_info(f'Name for {address} updated to {name}')
-                            current_in_netbox.update(data={'dns_name':name})
-                    else: # Wenn gar nicht in Netbox vorhanden, Addresse hinzufügen
-                        res = nb.ipam.ip_addresses.create(address=ip_mask, status='online', dns_name=name)
-                        if res:
-                            self.log_info(f'Added {address} - {name}')
-                        else:
-                            self.log_failure(f'Adding {address} - {name} FAILED')
-                else: # Wenn Ping nicht durch geht
-                    if name != '': # Wenn die Addresse im DNS vorhanden ist
-                        if current_in_netbox != None: # Und die Addresse in Netbox vorhanden ist
-                            current_in_netbox.update(data={'status':'in dns', 'dns_name':name})
-                        else: # Wenn die Addresse nicht in Netbox ist
-                            res = nb.ipam.ip_addresses.create(address=ip_mask, status='in dns', dns_name=name)
-                            if res:
-                                self.log_info(f'Added {address} - {name} with status in dns')
-                            else:
-                                self.log_failure(f'Adding {address} - {name} FAILED')
-                    else: # Wenn der Host im DNS nicht vorhanden ist
-                        if current_in_netbox != None: # Wenn die Addresse im Netbox vorhanden ist
-                            current_in_netbox.update(data={'status':'offline'})
+            for ip in network.hosts():
+                ip_with_mask = f"{ip}{mask}"
+                dns_name = reverse_dns_lookup(str(ip))
+                is_pingable = ping(str(ip), timeout=1)
+
+                existing_ip = IPAddress.objects.filter(address=ip_with_mask)
+
+                # IP-Adresse existiert bereits
+                if existing_ip:
+                    # Mache aus dem str() 'existing_ip' ein Objekt (Kann man an .filter und .get unterscheiden)
+                    existing_ip = IPAddress.objects.get(address=ip_with_mask)
+                    # Wenn die IP-Adresse pingbar ist und der Status nicht 'Online' ist, setze den Status auf 'Online'
+                    if is_pingable and existing_ip.status.label != "Online":
+                        existing_ip.status = 'online'
+                        self.log_info(f"IP {ip} is online. Updating status.")
+                    # Wenn die IP-Adresse nicht pingbar ist und der Status nicht 'Offline' ist, setze den Status auf 'Offline'
+                    elif not is_pingable and existing_ip.status.label != "Offline":
+                        existing_ip.status = 'offline'
+                        self.log_info(f"IP {ip} is offline. Updating status.")
+                    # Wenn die DNS-Namen unterschiedlich sind, setze den DNS-Namen neu
+                    if dns_name:
+                        if dns_name.lower() != existing_ip.dns_name.lower():
+                            existing_ip.dns_name = dns_name
+                            self.log_info(f"Updating DNS name for IP {ip} to {dns_name}.")
+                    existing_ip.full_clean()
+                    existing_ip.save()
+                    self.log_info(f"Updated IP {ip_with_mask}.")
+                # IP-Adresse existiert noch nicht
+                elif is_pingable or dns_name:
+                    status = 'online' if is_pingable else 'in dns'
+                    new_ip = IPAddress(address=ip_with_mask, status=status)
+                    new_ip.full_clean()
+                    new_ip.save()
+                    # Wenn ein DNS-Name gefunden wurde, setze ihn
+                    if dns_name:
+                        new_ip.dns_name = dns_name
+                        new_ip.full_clean()
+                        new_ip.save()
+                    
+                    self.log_info(f"Added new IP {ip_with_mask} with status {status}.")
