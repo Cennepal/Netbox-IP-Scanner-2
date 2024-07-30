@@ -9,6 +9,7 @@ class IPScanner(Script):
         name = "IP Scanner"
         description = "Scans available prefixes and updates ip addresses in IPAM Module using ping3"
         job_timeout = 36000  # Timeout für 10 Stunden
+        commit_default = True
 
     def run(self, data, commit):
         # Reverse Lookup mit Abbruch
