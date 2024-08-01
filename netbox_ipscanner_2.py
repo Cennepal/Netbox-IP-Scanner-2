@@ -1,22 +1,28 @@
 from extras.scripts import Script
-import socket
 import ipaddress
 from ping3 import ping
+import dns.resolver
+import dns.reversename
 from ipam.models import IPAddress, Prefix
 
 class IPScanner(Script):
     class Meta:
         name = "IP Scanner"
-        description = "Scans available prefixes and updates ip addresses in IPAM Module using ping3"
+        description = "Scans available prefixes and updates ip addresses in IPAM Module using ping3. UNCHECK AND RECHECK 'Commit Changes' to avoid Netbox from not committing changes!"
         job_timeout = 36000  # Timeout für 10 Stunden
-        commit_default = True
 
     def run(self, data, commit):
         # Reverse Lookup mit Abbruch
+        self.log_info(f"Running script (commit={commit})")
+        if not commit:
+            self.log_failure("Commit changes is not checked. Aborting script.")
+            return
+
         def reverse_dns_lookup(ip):
             try:
-                return socket.gethostbyaddr(ip)[0]
-            except socket.herror:
+                addr = dns.reversename.from_address(ip)
+                return str(dns.resolver.resolve(addr, "PTR")[0])
+            except (dns.resolver.NXDOMAIN, dns.resolver.Timeout, dns.resolver.NoNameservers):
                 return ''
 
         # Prefixe aus Netbox ziehen
@@ -38,7 +44,7 @@ class IPScanner(Script):
             for ip in network.hosts():
                 ip_with_mask = f"{ip}{mask}"
                 dns_name = reverse_dns_lookup(str(ip))
-                is_pingable = ping(str(ip), timeout=1)
+                is_pingable = ping(str(ip), timeout=0.002)
 
                 existing_ip = IPAddress.objects.filter(address=ip_with_mask)
 
@@ -47,11 +53,11 @@ class IPScanner(Script):
                     # Mache aus dem str() 'existing_ip' ein Objekt (Kann man an .filter und .get unterscheiden)
                     existing_ip = IPAddress.objects.get(address=ip_with_mask)
                     # Wenn die IP-Adresse pingbar ist und der Status nicht 'Online' ist, setze den Status auf 'Online'
-                    if is_pingable and existing_ip.status.label != "Online":
+                    if is_pingable and existing_ip.status != "online":
                         existing_ip.status = 'online'
                         self.log_info(f"IP {ip} is online. Updating status.")
                     # Wenn die IP-Adresse nicht pingbar ist und der Status nicht 'Offline' ist, setze den Status auf 'Offline'
-                    elif not is_pingable and existing_ip.status.label != "Offline":
+                    elif not is_pingable and existing_ip.status != "offline":
                         existing_ip.status = 'offline'
                         self.log_info(f"IP {ip} is offline. Updating status.")
                     # Wenn die DNS-Namen unterschiedlich sind, setze den DNS-Namen neu
