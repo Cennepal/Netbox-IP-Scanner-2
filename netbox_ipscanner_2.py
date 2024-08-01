@@ -8,7 +8,7 @@ from ipam.models import IPAddress, Prefix
 class IPScanner(Script):
     class Meta:
         name = "IP Scanner"
-        description = "Scans available prefixes and updates ip addresses in IPAM Module using ping3. UNCHECK AND RECHECK 'Commit Changes' to avoid Netbox from not committing changes!"
+        description = "Scans available prefixes and updates ip addresses in IPAM Module using ping3."
         job_timeout = 36000  # Timeout für 10 Stunden
 
     def run(self, data, commit):
