@@ -13,8 +13,7 @@ Well, it's not crack, but hear me out.
 
 # Alright, here are the dependencies. No rush.
 Alright here you go:  
-- ipcalc
-- pynetbox
+- dnspython
 - ping3
 
 # Custom status?
