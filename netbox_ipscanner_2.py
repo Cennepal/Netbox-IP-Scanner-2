@@ -44,7 +44,7 @@ class IPScanner(Script):
             for ip in network.hosts():
                 ip_with_mask = f"{ip}{mask}"
                 dns_name = reverse_dns_lookup(str(ip))
-                is_pingable = ping(str(ip), timeout=0.002)
+                is_pingable = ping(str(ip), timeout=0.5)
 
                 existing_ip = IPAddress.objects.filter(address=ip_with_mask)
 
