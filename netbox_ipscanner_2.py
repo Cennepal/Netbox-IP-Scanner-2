@@ -40,11 +40,22 @@ class IPScanner(Script):
             # IP-Adressen aus dem Subnetz ziehen
             network = ipaddress.IPv4Network(subnet.prefix)
             mask = f"/{network.prefixlen}"
+            is_pingable_ms_to = 0.4
+            sb_timeout = False
 
             for ip in network.hosts():
                 ip_with_mask = f"{ip}{mask}"
                 dns_name = reverse_dns_lookup(str(ip))
-                is_pingable = ping(str(ip), timeout=0.5)
+
+                # Pingen mit Timeout
+                is_pingable = ping(str(ip), timeout=is_pingable_ms_to, unit='ms')
+
+                if not sb_timeout and is_pingable:
+                    is_pingable_first = ping(str(ip), timeout=0.4, unit='ms')
+                    is_pingable_ms = round(is_pingable_first, 0)
+                    is_pingable_ms_to = (is_pingable_ms + 20) / 1000
+                    self.log_info(f"Pinging IP {ip} with result: {is_pingable_ms_to} s.")
+                    sb_timeout = True
 
                 existing_ip = IPAddress.objects.filter(address=ip_with_mask)
 
